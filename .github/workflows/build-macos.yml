@@ -1,0 +1,57 @@
+name: Build macOS installer
+run-name: Mac installer ${{ inputs.architecture }} / ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: '目标架构（Apple 芯片选 arm64）'
+        required: true
+        default: arm64
+        type: choice
+        options: [arm64, x86_64, both]
+      request_id:
+        description: 'Windows 构建请求标识；用于准确下载这一次的结果'
+        required: false
+        default: manual
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.architecture == 'both' && '["arm64","x86_64"]' || (inputs.architecture == 'arm64' && '["arm64"]' || '["x86_64"]')) }}
+    runs-on: ${{ matrix.target == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.target == 'arm64' && 'arm64' || 'x64' }}
+      - name: Optional private runtime configuration
+        shell: bash
+        env:
+          PRIVATE_APP_ENV: ${{ secrets.MAC_APP_ENV }}
+        run: |
+          if [[ -n "$PRIVATE_APP_ENV" ]]; then
+            umask 077
+            printf '%s\n' "$PRIVATE_APP_ENV" > .env
+          fi
+      - name: Build application and disk image
+        shell: bash
+        env:
+          PYTHON_BIN: python
+          MAC_BUILD_ARCH: ${{ matrix.target }}
+        run: bash scripts/build_macos.sh
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZhongBenAssistant-macOS-${{ matrix.target }}-${{ github.run_id }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14

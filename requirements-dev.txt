@@ -1,0 +1,5 @@
+# Pure-Python tests can run on Windows. Native macOS tests require a Mac.
+requests==2.32.5
+python-dotenv==1.1.1
+Pillow==11.3.0
+PyYAML==6.0.2
