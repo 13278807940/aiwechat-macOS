@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import math
 import platform
 import re
 import sys
@@ -59,8 +60,11 @@ class TextSpan:
     confidence: float = 1.0
 
 
-def _red_components(image, box):
+def _red_components(image, box, sx=1.0, sy=1.0):
     """Small, compact red badges; large red avatars cannot be badge candidates."""
+    sx, sy = float(sx), float(sy)
+    if not (math.isfinite(sx) and math.isfinite(sy) and sx > 0 and sy > 0):
+        raise ValueError("Image-to-point scales must be positive and finite")
     left, top, right, bottom = [int(v) for v in box]
     left, top = max(0, left), max(0, top)
     right, bottom = min(image.width, right), min(image.height, bottom)
@@ -84,12 +88,17 @@ def _red_components(image, box):
                 if p in points:
                     points.remove(p)
                     pending.append(p)
-        if len(component) < 5:
+        if len(component) / (sx * sy) < 5:
             continue
         x0, x1 = min(p[0] for p in component), max(p[0] for p in component)
         y0, y1 = min(p[1] for p in component), max(p[1] for p in component)
         w, h = x1 - x0 + 1, y1 - y0 + 1
-        if 3 <= w <= 30 and 3 <= h <= 30 and 0.5 <= w / h <= 2.1 and len(component) / (w * h) >= 0.4:
+        # CoreGraphics can return 2x Retina pixels while ScreenCaptureKit is
+        # configured for point-sized frames. Apply size and shape thresholds in
+        # screen points, retaining pixel coordinates for the returned boxes.
+        point_w, point_h = w / sx, h / sy
+        if (3 <= point_w <= 30 and 3 <= point_h <= 30
+                and 0.5 <= point_w / point_h <= 2.1 and len(component) / (w * h) >= 0.4):
             result.append((x0, y0, x1 + 1, y1 + 1))
     return sorted(result, key=lambda item: item[1])
 
@@ -490,7 +499,7 @@ class MacWeChat:
         sx, sy = image.width / window.width, image.height / window.height
         box = ((nav + 33) * sx, 73 * sy, min(nav + 65, layout["chat_left"] - 90) * sx,
                min(window.height - 12, image.height / sy) * sy)
-        badges = _red_components(image, box)
+        badges = _red_components(image, box, sx, sy)
         if not badges:
             return None
         x0, y0, x1, y1 = badges[0]
@@ -504,7 +513,7 @@ class MacWeChat:
             cgimage, image = self._capture(window)
             sx, sy = image.width / window.width, image.height / window.height
             nav_box = (24 * sx, 64 * sy, 65 * sx, 147 * sy)
-            nav_badges = _red_components(image, nav_box)
+            nav_badges = _red_components(image, nav_box, sx, sy)
             candidate = self._row_badge(image, window, layout)
             if not nav_badges and not candidate:
                 self._last_nav_badge = None
