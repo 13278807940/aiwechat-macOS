@@ -1,4 +1,4 @@
-"""macOS 14+ WeChat adapter (AX + window-only ScreenCaptureKit + Vision).
+"""macOS 12+ WeChat adapter (AX + window-only capture + Vision).
 
 No macOS frameworks are imported on other platforms. All coordinates used for
 input are Quartz screen points; captured pixels are mapped back to those points.
@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import platform
 import re
 import sys
 import threading
@@ -24,6 +25,15 @@ _UTILITY_NAMES = {"微信", "WeChat", "Weixin", "聊天", "Chats", "消息", "�
                   "搜索", "Search", "发送", "Send", "语音通话", "视频通话", "聊天信息", "更多",
                   "Contacts", "Settings", "服务号", "公众号", "订阅号消息", "微信团队"}
 _TIME = re.compile(r"^(?:\d{1,2}:\d{2}|(?:昨天|今天|星期[一二三四五六日天])(?:\s+\d{1,2}:\d{2})?|\d{4}年\d+月\d+日(?:.*)?)$")
+
+
+def _macos_version():
+    """Use the running OS, not the SDK used to build this application."""
+    try:
+        parts = platform.mac_ver()[0].split(".")
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except (TypeError, ValueError, IndexError):
+        return 0, 0
 
 
 def _clean_name(value: Any) -> str:
@@ -127,22 +137,35 @@ class MacWeChat:
 
     def _frameworks(self):
         if sys.platform != "darwin":
-            raise AssistantError("微信原生操作仅支持 macOS 14 或更新版本；Windows 只能检查代码或发起远程构建")
+            raise AssistantError("微信原生操作仅支持 macOS 12 或更新版本；Windows 只能检查代码或发起远程构建")
         if self._native is None:
+            version = _macos_version()
+            if version < (12, 0):
+                raise AssistantError("需要 macOS 12 或更新版本")
             try:
                 import AppKit
                 import ApplicationServices
                 import Quartz
-                import ScreenCaptureKit
                 import Vision
                 import Foundation
                 import objc
                 from PIL import Image
             except ImportError as exc:
                 raise AssistantError("缺少 macOS 依赖，请先执行 requirements-macos.txt 的安装命令") from exc
-            if not hasattr(ScreenCaptureKit, "SCScreenshotManager"):
-                raise AssistantError("需要 macOS 14 或更新版本的 ScreenCaptureKit")
-            self._native = (AppKit, ApplicationServices, Quartz, ScreenCaptureKit, Vision, Foundation, objc, Image)
+            # ScreenCaptureKit itself is absent on macOS 12.0-12.2, and its
+            # still-image API only exists on 14+. Do not even import it on older
+            # systems; those use the public CoreGraphics single-window API.
+            screen_capture = None
+            if version >= (14, 0):
+                try:
+                    import ScreenCaptureKit
+                    screen_capture = ScreenCaptureKit
+                except ImportError:
+                    pass
+            if not (screen_capture is not None and hasattr(screen_capture, "SCScreenshotManager")) and not callable(
+                    getattr(Quartz, "CGWindowListCreateImage", None)):
+                raise AssistantError("当前系统没有可用的微信窗口截图接口，请安装匹配系统的助手版本")
+            self._native = (AppKit, ApplicationServices, Quartz, screen_capture, Vision, Foundation, objc, Image)
         return self._native
 
     def permission_status(self, prompt=False):
@@ -288,35 +311,85 @@ class MacWeChat:
             raise AssistantError("无法获取微信窗口画面，请检查屏幕录制权限并重启助手")
         return state["value"]
 
+    def _validate_capture_window(self, window):
+        if window.window_id <= 0 or window.pid <= 0 or window.width < 100 or window.height < 100:
+            raise AssistantError("微信窗口截图尺寸或标识无效，请恢复微信窗口")
+        current = next((item for item in self.windows() if item.window_id == window.window_id
+                        and item.pid == window.pid), None)
+        if current is None:
+            raise AssistantError("微信窗口已发生变化，请重新选择联系人")
+        if any(abs(getattr(current, key) - getattr(window, key)) > 2
+               for key in ("x", "y", "width", "height")):
+            raise AssistantError("微信窗口已移动或调整大小，请重新识别联系人")
+
+    def _capture_screenshot_manager(self, window, sck):
+        shareable = self._await(lambda done: sck.SCShareableContent.getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler_(True, False, done))
+        native_window = next((item for item in shareable.windows() if int(item.windowID()) == window.window_id
+                              and int(item.owningApplication().processID()) == window.pid), None)
+        if native_window is None:
+            raise AssistantError("微信窗口已发生变化，请重新选择联系人")
+        content_filter = sck.SCContentFilter.alloc().initWithDesktopIndependentWindow_(native_window)
+        config = sck.SCStreamConfiguration.alloc().init()
+        # Produce point-sized pixels for stable layout. Only this WeChat window
+        # is included, even when another app overlaps it on the desktop.
+        config.setWidth_(max(1, int(round(window.width))))
+        config.setHeight_(max(1, int(round(window.height))))
+        config.setShowsCursor_(False)
+        if hasattr(config, "setIgnoreShadowsSingleWindow_"):
+            config.setIgnoreShadowsSingleWindow_(True)
+        return self._await(lambda done: sck.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(content_filter, config, done))
+
+    @staticmethod
+    def _capture_coregraphics(window, quartz):
+        capture = getattr(quartz, "CGWindowListCreateImage", None)
+        if not callable(capture):
+            raise AssistantError("当前系统没有可用的微信窗口截图接口")
+        # IncludingWindow alone captures exactly window_id. CGRectNull uses the
+        # window's complete bounds and IgnoreFraming excludes its shadow. Never
+        # use OnScreenOnly/All, a desktop crop, or kCGNullWindowID here.
+        try:
+            return capture(quartz.CGRectNull, quartz.kCGWindowListOptionIncludingWindow,
+                           window.window_id, quartz.kCGWindowImageBoundsIgnoreFraming)
+        except Exception as exc:
+            raise AssistantError("微信窗口截图失败，请检查屏幕录制权限后重试") from exc
+
+    @staticmethod
+    def _decode_capture(cgimage, window, appkit, quartz, image_module):
+        if cgimage is None:
+            raise AssistantError("无法获取微信窗口画面，请检查屏幕录制权限并重启助手")
+        width, height = int(quartz.CGImageGetWidth(cgimage)), int(quartz.CGImageGetHeight(cgimage))
+        if (width < 100 or height < 100
+                or abs((width / window.width) / (height / window.height) - 1) > 0.03):
+            raise AssistantError("微信窗口截图尺寸无效，请恢复微信窗口")
+        # Retina captures can contain two pixels per point. Keep their native
+        # resolution; OCR's normalized boxes and badge sx/sy already map to
+        # screen points. AppKit handles orientation and both CPU byte orders.
+        bitmap = appkit.NSBitmapImageRep.alloc().initWithCGImage_(cgimage)
+        encoded = bitmap.representationUsingType_properties_(appkit.NSBitmapImageFileTypePNG, {})
+        if encoded is None:
+            raise AssistantError("无法解码微信窗口图像")
+        with image_module.open(io.BytesIO(bytes(encoded))) as opened:
+            image = opened.convert("RGB")
+        if image.width != width or image.height != height:
+            raise AssistantError("微信窗口截图解码尺寸不一致，请重试")
+        if all(low == high for low, high in image.getextrema()):
+            raise AssistantError("微信窗口截图为空白，请恢复微信窗口并检查屏幕录制权限")
+        return cgimage, image
+
     def _capture(self, window):
+        self._require_ready()
+        self._validate_capture_window(window)
         appkit, _, quartz, sck, _, _, objc, image_module = self._frameworks()
         with objc.autorelease_pool():
-            shareable = self._await(lambda done: sck.SCShareableContent.getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler_(True, False, done))
-            native_window = next((item for item in shareable.windows() if int(item.windowID()) == window.window_id
-                                  and int(item.owningApplication().processID()) == window.pid), None)
-            if native_window is None:
-                raise AssistantError("微信窗口已发生变化，请重新选择联系人")
-            content_filter = sck.SCContentFilter.alloc().initWithDesktopIndependentWindow_(native_window)
-            config = sck.SCStreamConfiguration.alloc().init()
-            # Produce point-sized pixels for stable layout. Window-only capture
-            # remains valid when another app overlaps WeChat on the desktop.
-            config.setWidth_(max(1, int(round(window.width))))
-            config.setHeight_(max(1, int(round(window.height))))
-            config.setShowsCursor_(False)
-            if hasattr(config, "setIgnoreShadowsSingleWindow_"):
-                config.setIgnoreShadowsSingleWindow_(True)
-            cgimage = self._await(lambda done: sck.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(content_filter, config, done))
-            width, height = int(quartz.CGImageGetWidth(cgimage)), int(quartz.CGImageGetHeight(cgimage))
-            if width < 100 or height < 100:
-                raise AssistantError("微信窗口截图尺寸无效，请恢复微信窗口")
-            # AppKit encodes the correct orientation/byte order across CPUs.
-            bitmap = appkit.NSBitmapImageRep.alloc().initWithCGImage_(cgimage)
-            encoded = bitmap.representationUsingType_properties_(appkit.NSBitmapImageFileTypePNG, {})
-            if encoded is None:
-                raise AssistantError("无法解码微信窗口图像")
-            with image_module.open(io.BytesIO(bytes(encoded))) as opened:
-                image = opened.convert("RGB")
-            return cgimage, image
+            if sck is not None and hasattr(sck, "SCScreenshotManager"):
+                cgimage = self._capture_screenshot_manager(window, sck)
+            else:
+                cgimage = self._capture_coregraphics(window, quartz)
+            # A resized/closed/replaced window or a revoked permission must not
+            # leave an old frame available for recognition or input targeting.
+            self._require_ready()
+            self._validate_capture_window(window)
+            return self._decode_capture(cgimage, window, appkit, quartz, image_module)
 
     def _ocr(self, cgimage, window):
         _, _, quartz, _, vision, _, objc, _ = self._frameworks()

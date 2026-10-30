@@ -15,6 +15,13 @@ def main():
     if sys.platform != "darwin":
         print("此入口用于 macOS；Windows 上可运行 python main.py --check 检查源码。", file=sys.stderr)
         return 2
+    if "--smoke-test" in sys.argv:
+        import argparse
+        parser = argparse.ArgumentParser(description="Offline native bundle startup check")
+        parser.add_argument("--smoke-test", required=True, type=Path, metavar="OUTPUT.json")
+        args = parser.parse_args()
+        from mac_assistant.smoke_test import run as run_smoke_test
+        return run_smoke_test(args.smoke_test)
     from mac_assistant.app import run
     return run()
 

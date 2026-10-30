@@ -42,8 +42,8 @@ app = BUNDLE(
     collection, name=APP_NAME + ".app", bundle_identifier="net.saizhuge.zhongben.wechatassistant",
     info_plist={
         "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-        "CFBundleShortVersionString": "2.0.2", "CFBundleVersion": "202",
-        "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True,
+        "CFBundleShortVersionString": "2.0.3", "CFBundleVersion": "203",
+        "LSMinimumSystemVersion": "12.0", "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
         "NSScreenCaptureUsageDescription": "仅截取微信窗口，用于读取当前联系人和消息。",
         "NSAccessibilityUsageDescription": "识别微信联系人、输入回复，并在确认后发送。",

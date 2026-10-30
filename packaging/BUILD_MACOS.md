@@ -2,11 +2,11 @@
 
 这个目录是独立的 Mac 项目。不会改动原 Windows 助手。Windows 可编辑、测试纯逻辑和打源码包；`.app` / `.dmg` 必须在 macOS 上构建。本项目通过 GitHub Actions 的 macOS 机器完成这一步。
 
-当前代码面向 macOS 14 或更新版本；`arm64` 用于 Apple 芯片，`x86_64` 用于 Intel，二者分别构建。构建成功不等于已完成微信实机兼容性验证。需要在 Mac 上验收屏幕录制、辅助功能、联系人切换、OCR 和人工确认发送。
+当前 2.0.3 面向 macOS 12.0 及以上；`arm64` 用于 Apple 芯片，`x86_64` 用于 Intel，二者分别构建。macOS 12/13 用 CoreGraphics 指定窗口 ID 截图，14 及以上用 ScreenCaptureKit；不截取整个桌面。构建成功不等于已完成微信实机兼容性验证。需要在不同系统的 Mac 上验收屏幕录制、辅助功能、联系人切换、OCR 和人工确认发送。
 
 ## 路线一：你用 Windows，由 GitHub 的 Mac 构建
 
-前提：有 GitHub 账号、一个你能写入的仓库、GitHub Actions 已启用，账号有可用的 macOS 构建额度。公开仓库和私有仓库的计费不同，触发前查看自己的 Actions 额度。此处仅提供配置，没有替你创建仓库或启动构建。
+当前独立仓库为 `13278807940/aiwechat-macOS`，可通过 GitHub Actions 构建。云端构建机是 macOS 15，不能代替 macOS 12/13 实机验收。
 
 1. 把 **此文件夹的内容作为新仓库的根目录**，不要再套一层目录。新建仓库推荐设为私有。原 GitLab 仓库不能直接执行 `.github/workflows`；可以单独使用 GitHub 构建仓库，或由管理员提供自己的 macOS runner。
 2. 安装 [Git](https://git-scm.com/downloads/win) 和 [GitHub CLI](https://cli.github.com/)，然后在 PowerShell 执行 `gh auth login`。
@@ -24,7 +24,7 @@ git push -u origin main
 
 `.env` 已在 `.gitignore` 中排除，**不要使用 `git add -f .env`**。当前目录如果有 `.env`，它只用于本地开发。检查 `git status` 后再提交。
 
-4. 如果安装包需要内置你自己的 `.env`，在 GitHub 仓库 Settings → Secrets and variables → Actions 新建名为 `MAC_APP_ENV` 的 **Repository secret**，值填完整 `.env` 内容。工作流会写入并打包它，不会打印。注意：打入程序的密钥可以被安装包使用者提取；适合分发的配置应只含客户端公开参数，私密服务密钥应由登录后端管理。未配置 secret 时，安装包仍会包含 `.env.example` 默认配置。
+4. 如果安装包需要内置你自己的 `.env`，在 GitHub 仓库 Settings → Secrets and variables → Actions 新建名为 `MAC_APP_ENV` 的 **Repository secret**，值填完整 `.env` 内容。工作流会写入并打包它，不会打印。注意：打入程序的密钥可以被安装包使用者提取；适合分发的配置应只含客户端公开参数，私密服务密钥应由登录后端管理。未配置 secret 时，只包含 `.env.example` 样例，运行时使用代码默认网页；机器人参数需要另行导入到用户目录的 `.env`。
 5. Windows PowerShell 发起 Apple 芯片构建并等待、下载：
 
 ```powershell
@@ -47,7 +47,7 @@ Intel 版本改为 `-Architecture x86_64`，两个版本都要则用 `-Architect
 PYTHON_BIN=python3.11 bash scripts/build_macos.sh
 ```
 
-Apple 芯片使用 arm64 Python，Intel 使用 x86_64 Python。不要在 Apple 芯片上用 Rosetta 的 Python 构建 arm64 包。输出在 `release/`。脚本自动创建 `.venv`、安装依赖、跑纯逻辑测试、生成 `.app`、校验签名，再用系统 `hdiutil` 创建 `.dmg`。
+Apple 芯片使用 arm64 Python，Intel 使用 x86_64 Python。不要在 Apple 芯片上用 Rosetta 的 Python 构建 arm64 包。输出在 `release/`。脚本自动创建 `.venv`、安装依赖、跑纯逻辑测试、生成 `.app`、校验签名，再扫描所有 Mach-O 依赖和辅助进程，拒绝架构不符或最低系统高于 12.0 的文件。最后运行冻结应用的本地网页启动自检，并用系统 `hdiutil` 创建 `.dmg`。自检不访问线上业务、不调用微信、不申请屏幕录制或辅助功能权限。
 
 要只运行源码：
 

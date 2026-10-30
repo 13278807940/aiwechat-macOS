@@ -49,7 +49,7 @@ class Config:
     ai_base: str = ""
     bot_id: str = ""
     user_id: str = "aiwechat-mac"
-    app_version: str = "2.0.2"
+    app_version: str = "2.0.3"
 
 
 def load_config(data_dir=None):

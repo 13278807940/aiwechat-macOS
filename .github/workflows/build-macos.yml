@@ -7,7 +7,7 @@ on:
       architecture:
         description: '目标架构（Apple 芯片选 arm64）'
         required: true
-        default: arm64
+        default: both
         type: choice
         options: [arm64, x86_64, both]
       request_id:
@@ -49,6 +49,7 @@ jobs:
           MAC_BUILD_ARCH: ${{ matrix.target }}
         run: bash scripts/build_macos.sh
       - name: Upload installers
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ZhongBenAssistant-macOS-${{ matrix.target }}-${{ github.run_id }}

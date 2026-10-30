@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')][string]$Repo,
     [string]$Ref = 'main',
-    [ValidateSet('arm64', 'x86_64', 'both')][string]$Architecture = 'arm64',
+    [ValidateSet('arm64', 'x86_64', 'both')][string]$Architecture = 'both',
     [switch]$Push,
     [string]$OutputDirectory
 )

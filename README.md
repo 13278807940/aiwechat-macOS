@@ -2,7 +2,7 @@
 
 这是新建的 macOS 项目，代码、依赖和打包入口均独立。它不导入原 Windows 的 `main.py`，不依赖 Win32、COM、UIAutomation、Windows DLL 或 PaddleOCR，也不使用 Windows 安装器和更新器。
 
-**当前状态：已做 Windows 上可执行的逻辑与桥接测试，尚未在 Mac 上构建安装包、授权或验收真实微信。请先作为适配预览版测试，不应当作已验收的正式 Mac 产品分发。**
+**当前版本：2.0.3，兼容目标为 macOS 12.0 及以上；分别提供 Apple 芯片 arm64 和 Intel x86_64 包。2.0.2 已通过 macOS 云构建；本版增加旧系统截图分支、全部原生依赖最低系统版本检查及冻结应用启动自检。尚未在 macOS 12/13 和真实微信上验收，仍为预览测试版。**
 
 ## 文件与入口
 
@@ -24,7 +24,7 @@ tests/                          可在 Windows 跑的逻辑与桥接测试
 ## 已写入的功能
 
 - 加载现有线上页面：`https://yufabu.saizhuge.net/wxassistant/mobile/login`；保留线上样式。
-- 使用 macOS 辅助功能读取聊天标题；必要时使用 ScreenCaptureKit 按微信窗口 ID 截图，交给 Apple Vision OCR。没有整个桌面的截图回退。
+- 使用 macOS 辅助功能读取聊天标题；必要时按微信窗口 ID 截图，交给 Apple Vision OCR。macOS 14 及以上使用 ScreenCaptureKit，12/13 使用 CoreGraphics 的单窗口截图接口。没有整个桌面的截图回退。
 - 监听联系人变化，通过原有桥接通知客户资料页，保留所在页面，不把主页面重新加载回 AI 回复。
 - 辅助与自动回复共用未读定位、消息读取、AI 生成和发送核对流程。默认辅助模式，回复先写草稿，通过页面发送按钮确认；自动模式只有被明确调用时才发送。
 - 只有观察到消息红点时才双击消息按钮，并保留点击前的联系人信息；红点被查看消失时，也会检查当前聊天的最新客户文字。数字消息可以进入流程。
@@ -42,7 +42,7 @@ tests/                          可在 Windows 跑的逻辑与桥接测试
 
 ## 配置、缓存和日志
 
-根目录 `.env` 已从现有项目提取这份 Mac 代码实际使用的网页地址、智能客服地址/机器人 ID 和用户标识。它不包含 Windows 路径、DLL 或 Windows 更新接口。后续只修改本项目的配置，不要把它拷回 Windows 项目。
+Git 仓库只包含 `.env.example`。本机的 `.env` 或独立配置包可提供网页地址、智能客服地址/机器人 ID 和用户标识，不上传到公开仓库。它不包含 Windows 路径、DLL 或 Windows 更新接口。后续只修改本项目的配置。
 
 配置优先级从低到高：包内 `.env` → `~/Library/Application Support/ZhongBenAssistant/.env` → 显式进程环境变量。可把 `.env.example` 复制到该可写目录作为安装后的配置文件。
 
