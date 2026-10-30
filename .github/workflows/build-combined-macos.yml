@@ -1,0 +1,108 @@
+name: Build combined Mac installer
+run-name: Combined Mac installer / ${{ inputs.source_run }} / ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: '已成功构建两种架构的 build-macos.yml 运行 ID'
+        required: true
+        default: '40983976547'
+        type: string
+      app_version:
+        description: '两种原生应用的版本号'
+        required: true
+        default: '2.0.3'
+        type: string
+      request_id:
+        description: '请求标识'
+        required: false
+        default: manual
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source build identity
+        uses: actions/github-script@v7
+        env:
+          SOURCE_RUN: ${{ inputs.source_run }}
+        with:
+          script: |
+            const id = process.env.SOURCE_RUN;
+            if (!/^\d+$/.test(id)) throw new Error('Invalid source run ID');
+            const {data: run} = await github.rest.actions.getWorkflowRun({...context.repo, run_id: id});
+            if (run.conclusion !== 'success' || run.path !== '.github/workflows/build-macos.yml' ||
+                run.head_repository.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('Source must be a successful native Mac build from this repository');
+            }
+            const {data} = await github.rest.actions.listWorkflowRunArtifacts({...context.repo, run_id: id});
+            for (const arch of ['arm64', 'x86_64']) {
+              if (!data.artifacts.some(a => a.name === `ZhongBenAssistant-macOS-${arch}-${id}` && !a.expired)) {
+                throw new Error(`Missing native source artifact: ${arch}`);
+              }
+            }
+            core.info(`Source code commit: ${run.head_sha}`);
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: arm64
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ZhongBenAssistant-macOS-*-${{ inputs.source_run }}
+          path: native-inputs
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run }}
+      - name: Test installer selection and input validation
+        run: |
+          python -m unittest discover -s tests -p test_combined_installer.py -v
+          node tests/test_installer_selection.cjs
+      - name: Build one architecture-selecting package
+        env:
+          SOURCE_RUN: ${{ inputs.source_run }}
+          APP_VERSION: ${{ inputs.app_version }}
+        run: python scripts/build_combined_installer.py --inputs native-inputs --source-run "$SOURCE_RUN" --version "$APP_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZhongBenAssistant-Mac-Combined-${{ github.run_id }}
+          path: release/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+  verify-install:
+    needs: combine
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [arm64, x86_64]
+    runs-on: ${{ matrix.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.architecture == 'arm64' && 'arm64' || 'x64' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ZhongBenAssistant-Mac-Combined-${{ github.run_id }}
+          path: combined-inputs
+      - name: Install and reinstall, then launch native app
+        env:
+          NATIVE_ARCH: ${{ matrix.architecture }}
+        run: python scripts/test_combined_install.py --release combined-inputs --output "verification/${NATIVE_ARCH}.安装验证.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mac-Combined-Verification-${{ matrix.architecture }}-${{ github.run_id }}
+          path: verification/*
+          if-no-files-found: warn
+          retention-days: 14

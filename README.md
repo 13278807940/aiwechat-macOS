@@ -77,7 +77,9 @@ node .\tests\test_bridge.cjs
 
 ## 打包
 
-先看 [打包指令.md](打包指令.md)。Windows 可发起远程 macOS 构建；有 Mac 时可直接运行 `bash scripts/build_macos.sh`。本目录不含已经构建好的 `.dmg`。
+先看 [打包指令.md](打包指令.md)。Windows 可发起远程 macOS 构建；有 Mac 时可直接运行 `bash scripts/build_macos.sh`。
+
+对外统一分发时使用 [Mac通用安装包.md](packaging/Mac通用安装包.md)：一个 `.pkg` 内含两套原生组件，系统自动选择当前芯片，只安装一份助手。通用安装包不是将 PyInstaller 可执行文件用 `lipo` 强行拼接；已验证的两种原生程序保持各自完整。
 
 ## Mac 实机验收
 

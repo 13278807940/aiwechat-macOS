@@ -15,6 +15,10 @@ release/
 源码包/
 *.log
 *.dmg
+*.pkg
+native-inputs/
+combined-inputs/
+verification/
 *.app/
 *.zip
 wechat_friend_cache.json

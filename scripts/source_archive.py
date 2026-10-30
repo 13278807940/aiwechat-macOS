@@ -5,8 +5,9 @@ from pathlib import Path
 import zipfile
 
 EXCLUDED_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "build", "dist",
-                 "release", "下载的安装包", "源码包", ".idea", ".vscode", ".test-temp"}
-EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".log", ".zip", ".dmg"}
+                 "release", "下载的安装包", "源码包", ".idea", ".vscode", ".test-temp",
+                 "native-inputs", "combined-inputs", "verification"}
+EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".log", ".zip", ".dmg", ".pkg"}
 
 
 def source_files(root):
